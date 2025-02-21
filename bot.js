@@ -84,7 +84,7 @@ async function getExchangeRate(msg) {
       day: "numeric",
     }).format(new Date());
 
-    return ` *${lang.title}* (${date})\n${lang.kurs}: *${cbRateValue}*\n\n${lang.best_rates}:\n${lang.buy}: *${buyRate}* (🏦 ${buyBank})\n${lang.sell}: *${sellRate}* (🏦 ${sellBank})`;
+    return ` *${lang.title}* (${date})\n\n${lang.kurs}: *${cbRateValue}*\n\n${lang.best_rates}:\n${lang.buy}: *${buyRate}* (🏦 ${buyBank})\n${lang.sell}: *${sellRate}* (🏦 ${sellBank})`;
   } catch (error) {
     console.error("Ошибка парсинга:", error);
     return "❌ Ошибка получения курса валют.";
