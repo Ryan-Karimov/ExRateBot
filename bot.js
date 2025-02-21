@@ -65,7 +65,6 @@ async function getExchangeRate(msg) {
 
     const cleanText = (text) => text.replace(/сум/g, "").trim();
 
-    const cbRateTitle = cleanText($(".about-block a").first().text());
     const cbRateValue = cleanText(
       $(".col-2.cours-active").eq(1).find(".semibold-text").text()
     );
@@ -82,6 +81,7 @@ async function getExchangeRate(msg) {
       year: "numeric",
       month: "long",
       day: "numeric",
+      timeZone: "Asia/Tashkent",
     }).format(new Date());
 
     return ` *${lang.title}* (${date})\n\n${lang.kurs}: *${cbRateValue}*\n\n${lang.best_rates}:\n${lang.buy}: *${buyRate}* (🏦 ${buyBank})\n${lang.sell}: *${sellRate}* (🏦 ${sellBank})`;
