@@ -19,7 +19,7 @@ const messages = {
   ru: {
     start: "👋 Привет! Добро пожаловать.",
     title: "📊 Курс ЦБ РУз на сегодня",
-    kurs: "📊 Курс ЦБ РУз",
+    kurs: "💰 Курс ЦБ РУз",
     best_rates: "🏦 *Лучшие курсы в банках*",
     buy: "🔹 Покупка",
     sell: "🔹 Продажа",
@@ -28,7 +28,7 @@ const messages = {
   en: {
     start: "👋 Hello! Welcome.",
     title: "📊 CB Uz exchange rate today",
-    kurs: "📊 Exchange rate of the Central Bank of Uzbekistan",
+    kurs: "💰 Exchange rate of the Central Bank of Uzbekistan",
     best_rates: "🏦 *Best rates in banks*",
     buy: "🔹 Buy",
     sell: "🔹 Sell",
@@ -37,7 +37,7 @@ const messages = {
   uz: {
     start: "👋 Salom! Xush kelibsiz.",
     title: "📊 O'zMB kursi bugun",
-    kurs: "📊 O'zbekiston Markaziy banki kursi",
+    kurs: "💰 O'zbekiston Markaziy banki kursi",
     best_rates: "🏦 *Banklardagi eng yaxshi kurslar*",
     buy: "🔹 Sotib olish",
     sell: "🔹 Sotish",
@@ -46,7 +46,7 @@ const messages = {
   default: {
     start: "👋 Welcome!",
     title: "📊 CB Uz exchange rate today",
-    kurs: "📊 Exchange rate",
+    kurs: "💰 Exchange rate",
     best_rates: "🏦 *Best rates in banks*",
     buy: "🔹 Buy",
     sell: "🔹 Sell",
@@ -84,7 +84,7 @@ async function getExchangeRate(msg) {
       day: "numeric",
     }).format(new Date());
 
-    return `📊 *${lang.title}* (${date})\n💰 ${lang.kurs}: *${cbRateValue}*\n\n${lang.best_rates}:\n${lang.buy}: *${buyRate}* (🏦 ${buyBank})\n${lang.sell}: *${sellRate}* (🏦 ${sellBank})`;
+    return ` *${lang.title}* (${date})\n ${lang.kurs}: *${cbRateValue}*\n\n${lang.best_rates}:\n${lang.buy}: *${buyRate}* (🏦 ${buyBank})\n${lang.sell}: *${sellRate}* (🏦 ${sellBank})`;
   } catch (error) {
     console.error("Ошибка парсинга:", error);
     return "❌ Ошибка получения курса валют.";
