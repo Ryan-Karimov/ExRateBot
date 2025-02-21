@@ -11,9 +11,6 @@ const bot = new TelegramBot(TOKEN, { polling: true });
 const db = new Client({
   connectionString: process.env.DATABASE_URL,
   ssl: false,
-  //   ssl: {
-  //     rejectUnauthorized: false,
-  //   },
 });
 
 db.connect();
@@ -21,32 +18,36 @@ db.connect();
 const messages = {
   ru: {
     start: "👋 Привет! Добро пожаловать.",
-    kurs: "📊 Курс ЦБ РУз:",
-    best_rates: "🏦 *Лучшие курсы в банках:*",
+    title: "📊 Курс ЦБ РУз на сегодня",
+    kurs: "📊 Курс ЦБ РУз",
+    best_rates: "🏦 *Лучшие курсы в банках*",
     buy: "🔹 Покупка",
     sell: "🔹 Продажа",
     info: "📌 Чтобы узнать курс валют, отправьте команду: /kurs",
   },
   en: {
     start: "👋 Hello! Welcome.",
-    kurs: "📊 Exchange rate of the Central Bank of Uzbekistan:",
-    best_rates: "🏦 *Best rates in banks:*",
+    title: "📊 CB Uz exchange rate today",
+    kurs: "📊 Exchange rate of the Central Bank of Uzbekistan",
+    best_rates: "🏦 *Best rates in banks*",
     buy: "🔹 Buy",
     sell: "🔹 Sell",
     info: "📌 To get the exchange rate, send the command: /kurs",
   },
   uz: {
     start: "👋 Salom! Xush kelibsiz.",
-    kurs: "📊 O'zbekiston Markaziy banki kursi:",
-    best_rates: "🏦 *Banklardagi eng yaxshi kurslar:*",
+    title: "📊 O'zMB kursi bugun",
+    kurs: "📊 O'zbekiston Markaziy banki kursi",
+    best_rates: "🏦 *Banklardagi eng yaxshi kurslar*",
     buy: "🔹 Sotib olish",
     sell: "🔹 Sotish",
-    info: "📌 Valyuta kursini bilish uchun /kurs buyrug‘ini yuboring",
+    info: "📌 Valyuta kursini bilish uchun /kurs buyrug'ini yuboring",
   },
   default: {
     start: "👋 Welcome!",
-    kurs: "📊 Exchange rate:",
-    best_rates: "🏦 *Best rates in banks:*",
+    title: "📊 CB Uz exchange rate today",
+    kurs: "📊 Exchange rate",
+    best_rates: "🏦 *Best rates in banks*",
     buy: "🔹 Buy",
     sell: "🔹 Sell",
     info: "📌 To get the exchange rate, send the command: /kurs",
@@ -77,7 +78,13 @@ async function getExchangeRate(msg) {
 
     const lang = getLang(msg);
 
-    return `📊 *${cbRateTitle}*\n💰 ${lang.kurs} *${cbRateValue}*\n\n${lang.best_rates}:\n${lang.buy}: *${buyRate}* (🏦 ${buyBank})\n${lang.sell}: *${sellRate}* (🏦 ${sellBank})`;
+    const date = new Intl.DateTimeFormat(msg.from.language_code || "en", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    }).format(new Date());
+
+    return `📊 *${lang.title}* (${date})\n💰 ${lang.kurs}: *${cbRateValue}*\n\n${lang.best_rates}:\n${lang.buy}: *${buyRate}* (🏦 ${buyBank})\n${lang.sell}: *${sellRate}* (🏦 ${sellBank})`;
   } catch (error) {
     console.error("Ошибка парсинга:", error);
     return "❌ Ошибка получения курса валют.";
@@ -103,13 +110,14 @@ bot.onText(/\/start/, async (msg) => {
 bot.onText(/\/kurs/, async (msg) => {
   const chatId = msg.chat.id;
   const exchangeRate = await getExchangeRate(msg);
-  const userId = process.env.USER_ID;
 
-  bot.sendMessage(
-    userId,
-    `🔗 Юзернейм: @${msg.from.username || "Без юзернейма"}`
-  );
   bot.sendMessage(chatId, exchangeRate, { parse_mode: "Markdown" });
+  if (process.env.USER_ID) {
+    bot.sendMessage(
+      process.env.USER_ID,
+      `🔗 Юзернейм: @${msg.from.username || "Без юзернейма"}`
+    );
+  }
 });
 
 bot.onText(/\/help/, (msg) => {
@@ -134,14 +142,9 @@ bot.onText(/\/userslist/, async (msg) => {
 
   let userList = "📋 *Список пользователей:*\n\n";
   res.rows.forEach((user, i) => {
-    let usernameText;
-    if (user.username) {
-      const formattedUsername = user.username.replace(/_/g, "\\_");
-      usernameText = `[${formattedUsername}](https://t.me/${user.username})`;
-    } else {
-      usernameText = "нет";
-    }
-    console.log(usernameText);
+    const usernameText = user.username
+      ? `[${user.username}](https://t.me/${user.username.replace(/_/g, "\\_")})`
+      : "нет";
     userList += `👤 ${i + 1}. *ID:* ${user.user_id}\n`;
     userList += `   🏷 *Имя:* ${user.first_name}\n`;
     userList += `   🔗 *Юзернейм:* @${usernameText || "нет"}\n`;
