@@ -1,158 +1,171 @@
-const TelegramBot = require("node-telegram-bot-api");
-const { Client } = require("pg");
-const axios = require("axios");
-const cheerio = require("cheerio");
-require("dotenv").config();
+const { bot, db } = require("./src/config");
+const { getLang } = require("./src/messages");
+const { fetchCurrency, getYesterdayRates } = require("./src/parser");
+const { fmtCurrencyRate } = require("./src/formatters");
 
-const TOKEN = process.env.BOT_TOKEN;
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
-const bot = new TelegramBot(TOKEN, { polling: true });
+const { activityLog, resetActivityLog } = require("./src/handlers");
 
-const db = new Client({
-  connectionString: process.env.DATABASE_URL,
-  ssl: false,
-});
+// ── Create subscriptions table ──────────────────────────────────────
 
-db.connect();
+db.query(`
+  CREATE TABLE IF NOT EXISTS subscriptions (
+    user_id BIGINT NOT NULL,
+    currency VARCHAR(10) NOT NULL,
+    send_hour INTEGER DEFAULT 9,
+    created_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (user_id, currency)
+  )
+`).catch((err) => console.error("Ошибка создания таблицы subscriptions:", err));
 
-const messages = {
-  ru: {
-    start: "👋 Привет! Добро пожаловать.",
-    title: "📊 Курс ЦБ РУз на сегодня",
-    kurs: "💰 Курс ЦБ РУз",
-    best_rates: "🏦 *Лучшие курсы в банках*",
-    buy: "🔹 Покупка",
-    sell: "🔹 Продажа",
-    info: "📌 Чтобы узнать курс валют, отправьте команду: /kurs",
-  },
-  en: {
-    start: "👋 Hello! Welcome.",
-    title: "📊 CB Uz exchange rate today",
-    kurs: "💰 Exchange rate of the Central Bank of Uzbekistan",
-    best_rates: "🏦 *Best rates in banks*",
-    buy: "🔹 Buy",
-    sell: "🔹 Sell",
-    info: "📌 To get the exchange rate, send the command: /kurs",
-  },
-  uz: {
-    start: "👋 Salom! Xush kelibsiz.",
-    title: "📊 O'zMB kursi bugun",
-    kurs: "💰 O'zbekiston Markaziy banki kursi",
-    best_rates: "🏦 *Banklardagi eng yaxshi kurslar*",
-    buy: "🔹 Sotib olish",
-    sell: "🔹 Sotish",
-    info: "📌 Valyuta kursini bilish uchun /kurs buyrug'ini yuboring",
-  },
-  default: {
-    start: "👋 Welcome!",
-    title: "📊 CB Uz exchange rate today",
-    kurs: "💰 Exchange rate",
-    best_rates: "🏦 *Best rates in banks*",
-    buy: "🔹 Buy",
-    sell: "🔹 Sell",
-    info: "📌 To get the exchange rate, send the command: /kurs",
-  },
-};
+// Add send_hour column if table already exists without it
+db.query(`ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS send_hour INTEGER DEFAULT 9`)
+  .catch(() => {});
 
-function getLang(msg) {
-  return messages[msg.from.language_code] || messages.default;
-}
+// ── Subscription sender ─────────────────────────────────────────────
 
-async function getExchangeRate(msg) {
-  try {
-    const { data } = await axios.get(process.env.LINK);
-    const $ = cheerio.load(data);
-
-    const cleanText = (text) => text.replace(/сум/g, "").trim();
-
-    const cbRateValue = cleanText(
-      $(".col-2.cours-active").eq(1).find(".semibold-text").text()
-    );
-
-    const buyRate = cleanText($(".col-4 .semibold-text").first().text());
-    const buyBank = $(".col-4 .regular-text a").first().text().trim();
-
-    const sellRate = cleanText($(".col-4 .semibold-text").last().text());
-    const sellBank = $(".col-4 .regular-text a").last().text().trim();
-
-    const lang = getLang(msg);
-
-    const date = new Intl.DateTimeFormat(msg.from.language_code || "en", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      timeZone: "Asia/Tashkent",
-    }).format(new Date());
-
-    return ` *${lang.title}* (${date})\n\n${lang.kurs}: *${cbRateValue}*\n\n${lang.best_rates}:\n${lang.buy}: *${buyRate}* (🏦 ${buyBank})\n${lang.sell}: *${sellRate}* (🏦 ${sellBank})`;
-  } catch (error) {
-    console.error("Ошибка парсинга:", error);
-    return "❌ Ошибка получения курса валют.";
-  }
-}
-
-bot.onText(/\/start/, async (msg) => {
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-  const firstName = msg.from.first_name;
-  const lang = msg.from.language_code;
-  const username = msg.from.username || "Без юзернейма";
-
-  await db.query(
-    "INSERT INTO users (user_id, username, first_name, language, created_at) VALUES ($1, $2, $3, $4, NOW()) ON CONFLICT (user_id) DO NOTHING",
-    [userId, username, firstName, lang]
+async function sendSubscriptions(hour) {
+  const subs = await db.query(
+    `SELECT s.user_id, s.currency, u.language
+     FROM subscriptions s
+     JOIN users u ON u.user_id = s.user_id
+     WHERE s.send_hour = $1`,
+    [hour]
   );
 
-  const text = getLang(msg);
-  bot.sendMessage(chatId, `${text.start}\n\n${text.info}`);
-});
+  if (subs.rows.length === 0) return;
 
-bot.onText(/\/kurs/, async (msg) => {
-  const chatId = msg.chat.id;
-  const exchangeRate = await getExchangeRate(msg);
+  const prevRates = await getYesterdayRates();
+  const rateCache = {};
+  let sent = 0;
 
-  bot.sendMessage(chatId, exchangeRate, { parse_mode: "Markdown" });
-  if (process.env.USER_ID) {
-    bot.sendMessage(
-      process.env.USER_ID,
-      `🔗 Юзернейм: @${msg.from.username || "Без юзернейма"}`
-    );
-  }
-});
+  for (const sub of subs.rows) {
+    try {
+      if (!rateCache[sub.currency]) {
+        rateCache[sub.currency] = await fetchCurrency(sub.currency);
+      }
 
-bot.onText(/\/help/, (msg) => {
-  const chatId = msg.chat.id;
-  const text = getLang(msg).help;
+      const data = rateCache[sub.currency];
+      const lang = getLang(sub.language);
+      const text = fmtCurrencyRate(data, sub.currency, lang, sub.language, prevRates[sub.currency]);
 
-  bot.sendMessage(chatId, text);
-});
+      await bot.sendMessage(sub.user_id, text, { parse_mode: "Markdown" });
+      sent++;
+    } catch (err) {
+      if (err.response && err.response.statusCode === 403) {
+        await db.query("DELETE FROM subscriptions WHERE user_id = $1", [sub.user_id]);
+      } else {
+        console.error(`Subscription send error for ${sub.user_id}:`, err.message);
+      }
+    }
 
-bot.onText(/\/userslist/, async (msg) => {
-  if (msg.from.username !== ADMIN_USERNAME) {
-    return bot.sendMessage(msg.chat.id, "⛔ У вас нет доступа к этой команде.");
-  }
-
-  const res = await db.query(
-    "SELECT user_id, username, first_name, language, to_char(created_at, 'DD-MM-YYYY HH24:MI:SS') as created_at FROM users"
-  );
-
-  if (res.rows.length === 0) {
-    return bot.sendMessage(msg.chat.id, "📭 В базе данных нет пользователей.");
+    await new Promise((r) => setTimeout(r, 35));
   }
 
-  let userList = "📋 *Список пользователей:*\n\n";
-  res.rows.forEach((user, i) => {
-    const usernameText = user.username
-      ? `[${user.username}](https://t.me/${user.username.replace(/_/g, "\\_")})`
-      : "нет";
-    userList += `👤 ${i + 1}. *ID:* ${user.user_id}\n`;
-    userList += `   🏷 *Имя:* ${user.first_name}\n`;
-    userList += `   🔗 *Юзернейм:* @${usernameText || "нет"}\n`;
-    userList += `   🌍 *Язык:* ${user.language || "неизвестен"}\n`;
-    userList += `   📅 *Дата регистрации:* ${user.created_at}\n\n`;
+  if (sent > 0) console.log(`📬 Рассылка (${hour}:00): ${sent} сообщений`);
+}
+
+// ── Daily digest (21:00 Tashkent) ───────────────────────────────────
+
+let lastDigestDate = null;
+
+async function sendDigest() {
+  if (!process.env.USER_ID) return;
+
+  const now = new Date().toLocaleString("ru-RU", {
+    day: "numeric", month: "long", timeZone: "Asia/Tashkent",
   });
 
-  bot.sendMessage(msg.chat.id, userList, { parse_mode: "Markdown" });
-});
+  const [totalRes, subsRes] = await Promise.all([
+    db.query("SELECT COUNT(*) as count FROM users"),
+    db.query("SELECT currency, COUNT(*) as count FROM subscriptions GROUP BY currency ORDER BY count DESC"),
+  ]);
+
+  const totalUsers = totalRes.rows[0].count;
+  const activeCount = activityLog.activeUsers.size;
+  const totalActions = Object.values(activityLog.actions).reduce((a, b) => a + b, 0);
+
+  let text = `📊 *Дайджест за ${now}*\n\n`;
+  text += `👥 Всего: *${totalUsers}* | Активных: *${activeCount}*\n`;
+
+  // New users
+  if (activityLog.newUsers.length > 0) {
+    text += `🆕 Новые: *${activityLog.newUsers.length}*\n`;
+    activityLog.newUsers.forEach((u, i) => {
+      const uname = u.username ? `@${u.username}` : "без юзернейма";
+      text += `  ${i + 1}. ${u.name} (${uname})\n`;
+    });
+  } else {
+    text += `🆕 Новые: *0*\n`;
+  }
+
+  // Actions
+  text += `\n📈 Запросов: *${totalActions}*\n`;
+  if (totalActions > 0) {
+    const parts = Object.entries(activityLog.actions)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => `${k} — ${v}`);
+    text += `  ${parts.join(" | ")}\n`;
+  }
+
+  // Popular currency
+  const sortedCur = Object.entries(activityLog.currencies).sort((a, b) => b[1] - a[1]);
+  if (sortedCur.length > 0) {
+    text += `\n💰 Популярная: *${sortedCur[0][0]}* (${sortedCur[0][1]})\n`;
+  }
+
+  // Subscriptions
+  const totalSubs = subsRes.rows.reduce((a, r) => a + parseInt(r.count), 0);
+  const subChange = activityLog.subsAdded || activityLog.subsRemoved
+    ? ` (+${activityLog.subsAdded} / -${activityLog.subsRemoved})`
+    : "";
+  text += `\n🔔 Подписки: *${totalSubs}*${subChange}\n`;
+  if (subsRes.rows.length > 0) {
+    text += `  ${subsRes.rows.map((s) => `${s.currency}: ${s.count}`).join(" | ")}\n`;
+  }
+
+  // Blocked
+  if (activityLog.blocked > 0) {
+    text += `\n🚫 Заблокировали: *${activityLog.blocked}*\n`;
+  }
+
+  await bot.sendMessage(process.env.USER_ID, text, { parse_mode: "Markdown" });
+  resetActivityLog();
+}
+
+// ── Scheduler ───────────────────────────────────────────────────────
+
+let lastSentHour = null;
+
+setInterval(() => {
+  const now = new Date().toLocaleString("en-US", { timeZone: "Asia/Tashkent" });
+  const d = new Date(now);
+  const today = d.toISOString().split("T")[0];
+  const hourKey = `${today}_${d.getHours()}`;
+
+  // Send subscriptions every hour (for users who chose that hour)
+  if (d.getMinutes() === 0 && lastSentHour !== hourKey) {
+    lastSentHour = hourKey;
+    sendSubscriptions(d.getHours()).catch((err) => console.error("Scheduler error:", err));
+  }
+
+  if (d.getHours() === 6 && d.getMinutes() === 0 && lastDigestDate !== today) {
+    lastDigestDate = today;
+    sendDigest().catch((err) => console.error("Digest error:", err));
+  }
+}, 30_000);
+
+// ── Graceful shutdown ───────────────────────────────────────────────
+
+function shutdown(signal) {
+  console.log(`\n${signal} received. Shutting down...`);
+  bot.stopPolling();
+  db.end().then(() => {
+    console.log("DB connection closed.");
+    process.exit(0);
+  });
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 console.log("Бот запущен...");
