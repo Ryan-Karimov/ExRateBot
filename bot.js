@@ -5,7 +5,7 @@ const { fmtCurrencyRate } = require("./src/formatters");
 
 const { activityLog, resetActivityLog } = require("./src/handlers");
 
-// ── Create subscriptions table ──────────────────────────────────────
+// ── Create tables ───────────────────────────────────────────────────
 
 db.query(`
   CREATE TABLE IF NOT EXISTS subscriptions (
@@ -20,6 +20,19 @@ db.query(`
 // Add send_hour column if table already exists without it
 db.query(`ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS send_hour INTEGER DEFAULT 9`)
   .catch(() => {});
+
+db.query(`
+  CREATE TABLE IF NOT EXISTS rates_history (
+    date DATE NOT NULL,
+    currency VARCHAR(10) NOT NULL,
+    cb_rate INTEGER,
+    bank_buy_rate INTEGER,
+    bank_buy_name TEXT,
+    bank_sell_rate INTEGER,
+    bank_sell_name TEXT,
+    PRIMARY KEY (date, currency)
+  )
+`).catch((err) => console.error("Ошибка создания таблицы rates_history:", err));
 
 // ── Subscription sender ─────────────────────────────────────────────
 
